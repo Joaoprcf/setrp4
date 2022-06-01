@@ -68,7 +68,7 @@ k_tid_t thread_B_tid;
 k_tid_t thread_C_tid;
 
 /* Global vars (shared memory between tasks A/B and B/C, resp) */
-uint16_t adcbuffer[ARRAY_SIZE];
+uint16_t adc_sample_buffer[BUFFER_SIZE];
 uint8_t ptr = 0;
 
 /* Create fifos*/
@@ -104,7 +104,7 @@ const struct device *pwm = NULL;
  *
  * @return int
  */
-static int adc_sample(uint16_t *adc_sample_buffer)
+static int adc_sample(uint16_t *adcbuffer)
 {
     int ret;
     const struct adc_sequence sequence = {
@@ -235,7 +235,7 @@ void main(void)
  */
 void thread_A(void *argA, void *argB, void *argC)
 {
-    static uint16_t adc_sample_buffer[BUFFER_SIZE];
+    uint16_t adcbuffer[ARRAY_SIZE];
 
     /* Timing variables to control task periodicity */
     int64_t fin_time = 0, release_time = 0;
@@ -248,7 +248,7 @@ void thread_A(void *argA, void *argB, void *argC)
     while (true)
     {
         /* Get one sample, checks for errors and prints the values */
-        int err = adc_sample(adc_sample_buffer);
+        int err = adc_sample(adcbuffer);
         if (err)
         {
             printk("adc_sample() failed with error code %d\n\r", err);
