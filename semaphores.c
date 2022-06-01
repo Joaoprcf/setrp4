@@ -20,8 +20,26 @@
 #include <timing/timing.h>
 #include <stdlib.h>
 #include <stdio.h>
-
 #include <hal/nrf_saadc.h>
+#include <drivers/pwm.h>
+
+#define PWM_LED0_NODE	DT_ALIAS(pwm_led0)
+
+#if DT_NODE_HAS_STATUS(PWM_LED0_NODE, okay)
+#define PWM_CTLR	DT_PWMS_CTLR(PWM_LED0_NODE)
+#define PWM_CHANNEL	DT_PWMS_CHANNEL(PWM_LED0_NODE)
+#define PWM_FLAGS	DT_PWMS_FLAGS(PWM_LED0_NODE)
+#else
+#error "Unsupported board: pwm-led0 devicetree alias is not defined"
+#define PWM_CTLR	DT_INVALID_NODE
+#define PWM_CHANNEL	0
+#define PWM_FLAGS	0
+#endif
+
+#define MIN_PERIOD_USEC	(USEC_PER_SEC / 64U)
+#define MAX_PERIOD_USEC	USEC_PER_SEC
+
+
 #define ADC_NID DT_NODELABEL(adc) 
 #define ADC_RESOLUTION 10
 #define ADC_GAIN ADC_GAIN_1_4
@@ -68,8 +86,6 @@ k_tid_t thread_B_tid;
 k_tid_t thread_C_tid;
 
 /* Global vars (shared memory between tasks A/B and B/C, resp) */
-int ab = 100;
-int bc = 200;
 uint16_t avg_value = 0;
 uint16_t adcbuffer[ARRAY_SIZE];
 uint8_t ptr = 0;
@@ -93,8 +109,8 @@ static const struct adc_channel_cfg my_channel_cfg = {
 };
 
 /* Global vars */
-struct k_timer my_timer;
 const struct device *adc_dev = NULL;
+const struct device *pwm = NULL;
 static uint16_t adc_sample_buffer[BUFFER_SIZE];
 
 /* Takes one sample */
@@ -115,7 +131,9 @@ static int adc_sample(void)
 
 	ret = adc_read(adc_dev, &sequence);
 	if (ret) {
-            printk("adc_read() failed with code %d\n", ret);
+          printk("adc_read() failed with code %d\n", ret);
+        } else if(adc_sample_buffer[0] > 1023) {
+          return -1;
         } else {
           adcbuffer[ptr] = adc_sample_buffer[0];
           ptr = (ptr+1)%ARRAY_SIZE;
@@ -124,7 +142,7 @@ static int adc_sample(void)
 	return ret;
 }
 
-uint16_t filter(uint16_t *arr)
+int16_t filter(uint16_t *arr)
 {
     int i;
     uint16_t sum = 0;
@@ -146,13 +164,20 @@ uint16_t filter(uint16_t *arr)
             ctn += 1;
         }
     }
-    return ctn ? (uint16_t)(sum / (float)ctn) : (uint16_t)mean;
+    return ctn ? (uint16_t)(sum / (float)ctn) : -1;
 }
 
 /* Main function */
 void main(void) {
 
     int err=0;
+    
+
+    pwm = DEVICE_DT_GET(PWM_CTLR);
+	if (!device_is_ready(pwm)) {
+		printk("Error: PWM device %s is not ready\n", pwm->name);
+		return;
+	}
 
     /* Welcome message */
     printk("\n\r Simple adc demo for  \n\r");
@@ -205,11 +230,6 @@ void thread_A_code(void *argA , void *argB, void *argC)
     /* Timing variables to control task periodicity */
     int64_t fin_time=0, release_time=0;
 
-    /* Other variables */
-    long int nact = 0;
-    
-    printk("Thread A init (periodic)\n");
-
     /* Compute next release instant */
     release_time = k_uptime_get() + thread_A_period;
 
@@ -223,17 +243,16 @@ void thread_A_code(void *argA , void *argB, void *argC)
         }
         else {
             if(adc_sample_buffer[0] > 1023) {
-                printk("adc reading out of range\n\r");
+                printk("Adc reading out of range\n\r");
             }
             else {
                 /* ADC is set to use gain of 1/4 and reference VDD/4, so input range is 0...VDD (3 V), with 10 bit resolution */
-                printk("adc reading: raw:%4u / %4u mV: \n\r",adc_sample_buffer[0],(uint16_t)(1000*adc_sample_buffer[0]*((float)3/1023)));
+                printk("ADC reading: raw:%4u / %4u mV: \n\r",adc_sample_buffer[0],(uint16_t)(1000*adc_sample_buffer[0]*((float)3/1023)));
             }
         }
 
         /* Sleep a while ... */
         k_sem_give(&sem_ab);
-        ab++;
        
         /* Wait for next release instant */ 
         fin_time = k_uptime_get();
@@ -247,17 +266,17 @@ void thread_A_code(void *argA , void *argB, void *argC)
 
 void thread_B_code(void *argA , void *argB, void *argC)
 {
-    /* Other variables */
-    long int nact = 0;
 
-    printk("Thread B init (sporadic, waits on a semaphore by task A)\n");
     while(1) {
         k_sem_take(&sem_ab,  K_FOREVER);
-        printk("Thread B instance %ld released at time: %lld (ms). \n",++nact, k_uptime_get());  
-        printk("Task B read ab value: %d\n",ab);
-        bc++;
+        
         avg_value = filter(adcbuffer);
-        printk("Thread B set bc value to: %d \n",bc);  
+        if((int16_t)avg_value==-1) {
+          printk("Task B could not transform into a valid value\n", avg_value);
+        } else {
+          printk("Task B filter average into: %u\n", avg_value);
+        }
+        
         k_sem_give(&sem_bc);
 
         
@@ -266,14 +285,15 @@ void thread_B_code(void *argA , void *argB, void *argC)
 
 void thread_C_code(void *argA , void *argB, void *argC)
 {
-    /* Other variables */
-    long int nact = 0;
 
-    printk("Thread C init (sporadic, waits on a semaphore by task A)\n");
     while(1) {
-        k_sem_take(&sem_bc, K_FOREVER);
-        printk("Thread C instance %5ld released at time: %lld (ms). \n",++nact, k_uptime_get());          
-        printk("Task C read bc value: %d, %u\n",bc, avg_value);
+        k_sem_take(&sem_bc, K_FOREVER);         
+        if((int16_t)avg_value==-1) {
+            printk("Read error!\n");
+        } else {
+            int ret = pwm_pin_set_usec(pwm, PWM_CHANNEL,  1023U, avg_value, PWM_FLAGS);
+            printk("Read avg value: %u\n", avg_value);
+        }
 
         
   }
