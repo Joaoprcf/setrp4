@@ -1,3 +1,13 @@
+/**
+ * @file semaphores.c
+ * @author João Paulo (joaoprcf@ua.pt)
+ * @brief Semaphores and shared memory implementation
+ * @version 0.1
+ * @date 2022-06-01
+ *
+ * @copyright Copyright (c) 2022
+ *
+ */
 #include <zephyr.h>
 #include <device.h>
 #include <drivers/gpio.h>
@@ -35,8 +45,8 @@
 #define ADC_CHANNEL_ID 1
 #define ADC_CHANNEL_INPUT NRF_SAADC_INPUT_AIN1
 
-#define BUFFER_SIZE 1
-#define ARRAY_SIZE 10
+#define BUFFER_SIZE 1 ///< buffer size
+#define ARRAY_SIZE 10 ///< array size
 
 /* Other defines */
 #define TIMER_INTERVAL_MSEC 1000 /* Interval between ADC samples */
@@ -45,36 +55,36 @@
 #define STACK_SIZE 1024
 
 /* Thread scheduling priority */
-#define thread_A_prio 1
-#define thread_B_prio 1
-#define thread_C_prio 1
+#define thread_A_prio 1 ///< Thread A priority
+#define thread_B_prio 1 ///< Thread B priority
+#define thread_C_prio 1 ///< Thread C priority
 
 /* Therad periodicity (in ms)*/
-#define thread_A_period 1000
+#define thread_A_period 1000 ///< Thread A period
 
 /* Create thread stack space */
-K_THREAD_STACK_DEFINE(thread_A_stack, STACK_SIZE);
-K_THREAD_STACK_DEFINE(thread_B_stack, STACK_SIZE);
-K_THREAD_STACK_DEFINE(thread_C_stack, STACK_SIZE);
+K_THREAD_STACK_DEFINE(thread_A_stack, STACK_SIZE); ///< Thread A stack
+K_THREAD_STACK_DEFINE(thread_B_stack, STACK_SIZE); ///< Thread B stack
+K_THREAD_STACK_DEFINE(thread_C_stack, STACK_SIZE); ///< Thread C stack
 
 /* Create variables for thread data */
-struct k_thread thread_A_data;
-struct k_thread thread_B_data;
-struct k_thread thread_C_data;
+struct k_thread thread_A_data; ///< Thread A data
+struct k_thread thread_B_data; ///< Thread B data
+struct k_thread thread_C_data; ///< Thread C data
 
 /* Create task IDs */
-k_tid_t thread_A_tid;
-k_tid_t thread_B_tid;
-k_tid_t thread_C_tid;
+k_tid_t thread_A_tid; ///< ID thread A
+k_tid_t thread_B_tid; ///< ID thread B
+k_tid_t thread_C_tid; ///< ID thread C
 
-/* Global vars (shared memory between tasks A/B and B/C, resp) */
-uint16_t avg_value = 0;
-uint16_t adcbuffer[ARRAY_SIZE];
-uint8_t ptr = 0;
+/* Global vars */
+uint16_t adcbuffer[ARRAY_SIZE]; ///< adc buffer
+uint8_t ptr = 0;                ///< adc buffer ptr
+uint16_t avg_value = 0;         ///< avg value
 
 /* Semaphores for task synch */
-struct k_sem sem_ab;
-struct k_sem sem_bc;
+struct k_sem sem_ab; ///< sem a-b
+struct k_sem sem_bc; ///< sem b-c
 
 /* Thread code prototypes */
 void thread_A(void *argA, void *argB, void *argC);
@@ -82,7 +92,7 @@ void thread_B(void *argA, void *argB, void *argC);
 void thread_C(void *argA, void *argB, void *argC);
 
 /* ADC channel configuration */
-static const struct adc_channel_cfg my_channel_cfg = {
+static const struct adc_channel_cfg my_channel_cfg = { ///< adc config
     .gain = ADC_GAIN,
     .reference = ADC_REFERENCE,
     .acquisition_time = ADC_ACQUISITION_TIME,
@@ -90,9 +100,9 @@ static const struct adc_channel_cfg my_channel_cfg = {
     .input_positive = ADC_CHANNEL_INPUT};
 
 /* Global vars */
-const struct device *adc_dev = NULL;
-const struct device *pwm = NULL;
-static uint16_t adc_sample_buffer[BUFFER_SIZE];
+const struct device *adc_dev = NULL;            ///< adc device config
+const struct device *pwm = NULL;                ///< pwm config
+static uint16_t adc_sample_buffer[BUFFER_SIZE]; ///< adc sample buffer array
 
 /**
  * @brief Retrieve an ADC sample a buffer
